@@ -1,0 +1,347 @@
+系统环境： centos7.6
+[root@bogon ~]# cat /etc/redhat-release 
+CentOS Linux release 7.6.1810 (Core) 
+
+关闭防火墙、selinux
+
+永久关闭（需要重启） sed -i 's/enforcing/disabled/'   /etc/selinux/config
+       临时关闭    setenforce  0
+
+关闭防火墙
+systemctl disable  firewalld
+systemctl stop firewalld
+
+
+主机名配置
+hostnamectl set-hostname  master
+hostnamectl set-hostname  node1
+hostnamectl set-hostname  node2
+
+主机名 IP地址
+master 192.168.1.26
+node1 192.168.1.27
+node2 192.168.1.28
+
+JDK 下载安装
+下载地址  https://github.com/frekele/oracle-java/releases
+
+JDK 安装
+rpm -ivh  jdk-8u212-linux-x64 (1).rpm
+
+JDK 版本
+[root@bogon ~]# java -version
+java version "1.8.0_212"
+Java(TM) SE Runtime Environment (build 1.8.0_212-b10)
+Java HotSpot(TM) 64-Bit Server VM (build 25.212-b10, mixed mode)
+
+
+创建用户和组
+创建用户
+useradd hadoop
+
+查看用户
+[root@hadoop-master ~]# id hadoop
+uid=1000(hadoop) gid=1000(hadoop) 组=1000(hadoop)
+
+
+hadoop用户授权sudo权限
+/etc/sudoers  
+hadoop  ALL=(ALL)       NOPASSWD: ALL
+
+
+配置hosts文件
+192.168.1.26    hadoop-master
+192.168.1.27    hadoop-node1
+192.168.1.28    hadoop-node2
+
+ssh免密钥登陆
+
+默认一直回车
+
+
+复制公钥，每台主机都执行
+ssh-copy-id hadoop-node1
+ssh-copy-id hadoop-node2
+ssh-copy-id hadoop-master
+
+zookeeper
+下载	  wget http://mirror.bit.edu.cn/apache/zookeeper/zookeeper-3.4.14/zookeeper-3.4.14.tar.gz
+
+
+创建目录
+   mkdir  /usr/local/zookeeper/{data,logs}  -p
+
+解压
+tar zxvf zookeeper-3.4.14.tar.gz  -C /usr/local/zookeeper/
+
+添加环境变量
+vim /etc/profile
+export ZOOKEEPER=/usr/local/zookeeper
+export PATH=$PATH:$ZOOKEEPER/bin
+
+source /etc/profile
+
+
+配置zookeeper
+cd /usr/local/zookeeper/conf
+cp zoo_sample.cfg  zoo.cfg
+[root@hadoop-master conf]# grep -v '^#'  zoo.cfg 
+tickTime=2000
+initLimit=10
+syncLimit=5
+dataDir=/usr/local/zookeeper/data
+dataLogDir=/usr/local/zookeeper/logs
+clientPort=2181
+server.0=192.168.1.26:2888:3888
+server.1=192.168.1.27:2888:3888
+server.2=192.168.1.28:2888:3888
+
+在  data 目录创建 myid 文件写入自己ID号
+touch ../data/myid && echo 0 > ../data/myid   master节点0  node1节点1  node2节点2
+
+启动服务
+[root@hadoop-node2 zookeeper]# ./bin/zkServer.sh start
+
+查看进程
+[root@hadoop-master zookeeper]# jps
+27218 QuorumPeerMain
+27305 Jps
+
+[root@hadoop-master zookeeper]# ./bin/zkServer.sh status
+ZooKeeper JMX enabled by default
+Using config: /usr/local/zookeeper/bin/../conf/zoo.cfg
+Mode: follower
+
+
+安装hadoop
+下载地址  http://mirror.bit.edu.cn/apache/hadoop/core/hadoop-2.7.7/
+解压软件  tar zxvf hadoop-2.7.7.tar.gz
+
+mv hadoop-2.7.7  /usr/local/hadoop
+
+修改环境变量
+export HADOOP_HOME=/usr/local/hadoop
+export PATH=$PATH:$HADOOP_HOME/bin:$HADOOP_HOME/sbin
+
+source /etc/profile
+
+修改hadoop环境变量文件
+vim etc/hadoop/hadoop-env.sh 
+export JAVA_HOME=/usr/java/jdk1.8.0_212-amd64  JDK 目录
+
+vim etc/hadoop/yarn-env.sh
+export JAVA_HOME=/usr/java/jdk1.8.0_212-amd64
+
+查看版本
+[root@hadoop-master hadoop]# hadoop version
+Hadoop 2.7.7
+Subversion Unknown -r c1aad84bd27cd79c3d1a7dd58202a8c3ee1ed3ac
+Compiled by stevel on 2018-07-18T22:47Z
+Compiled with protoc 2.5.0
+From source with checksum 792e15d20b12c74bd6f19a1fb886490
+This command was run using /usr/local/hadoop/share/hadoop/common/hadoop-common-2.7.7.jar
+
+配置hadoop
+进入hadoop配置目录
+cd /usr/local/hadoop/etc/hadoop
+
+创建配置文件目录
+mkdir /usr/local/hadoop/{tmp,hdfs/{name,data}}  -p
+
+修改  core-site.xml、hdfs-site.xml、yarn-site.xml、mapred-site.xml、slaves
+
+core-site.xml
+<configuration>
+  <property>
+    <name>fs.defaultFS</name>
+    <value>hdfs://master:9000</value>
+  </property>
+
+  <property>
+    <name>io.file.buffer.size</name>
+    <value>2048</value>
+  </property>
+
+  <property>
+    <name>hadoop.tmp.dir</name>
+    <value>/usr/local/hadoop/tmp</value>
+  </property>
+</configuration>
+
+cat hdfs-site.xml 
+<configuration>
+  <property>
+    <name>dfs.replication</name>
+    <value>3</value>
+  </property> 
+  
+  <property>
+    <name>dfs.namenode.name.dir</name>
+    <value>/usr/local/hadoop/hdfs/name</value>
+  </property>
+
+  <property>
+    <name>dfs.datanode.data.dir</name>
+    <value>/usr/local/hadoop/hdfs/data</value>
+  </property>
+
+  <property>
+    <name>dfs.http.address</name>
+    <value>master:50070</value>
+  </property>
+
+  <property>
+    <name>dfs.secondary.http.address</name>
+    <value>master:50090</value>
+  </property>
+
+  <property>
+    <name>dfs.webhdfs.enabled</name>
+    <value>true</value>
+  </property>
+
+  <property>
+    <name>dfs.permissions</name>
+    <value>false</value>
+  </property>
+
+</configuration>
+
+
+
+yarn-site.xml
+<configuration>
+  <property>
+        <name>yarn.resourcemanager.hostname</name>
+        <value>master</value>
+    </property>
+    <property>
+        <name>yarn.nodemanager.aux-services</name>
+        <value>mapreduce_shuffle</value>
+    </property>
+    <property>
+        <name>yarn.resourcemanager.address</name>
+        <value>master:8032</value>
+    </property>
+    <property>
+        <name>yarn.resourcemanager.scheduler.address</name>
+        <value>master:8030</value>
+    </property>
+    <property>
+        <name>yarn.resourcemanager.resource-tracker.address</name>
+        <value>master:8031</value>
+    </property>
+    <property>
+        <name>yarn.resourcemanager.admin.address</name>
+        <value>master:8033</value>
+    </property>
+    <property>
+        <name>yarn.resourcemanager.webapp.address</name>
+        <value>master:8088</value>
+    </property>
+
+</configuration>
+
+mapred-site.xml
+cp mapred-site.xml.template  mapred-site.xml
+
+cat  mapred-site.xml
+<configuration>
+  <property>
+    <name>mapreduce.framework.name</name>
+    <value>yarn</value>
+  </property>
+ <property>
+    <name>mapreduce.jobhistory.address</name>
+    <value>master:10020</value>
+  </property>
+
+  <property>
+    <name>mapreduce.jobhistory.webapp.address</name>
+    <value>master:19888</value>
+  </property>
+
+</configuration>
+
+修改 slaves
+[root@hadoop-master hadoop]# cat slaves 
+hadoop-node1
+hadoop-node2
+
+复制文件到node节点
+scp  -r /usr/local/hadoop/  hadoop-node1:/usr/local/
+scp  -r /usr/local/hadoop/  hadoop-node2:/usr/local/
+
+
+格式化hdfs
+ 	./bin/hdfs  namenode -format
+格式化成功
+
+
+启动hdfs
+
+
+查看状态
+
+
+node节点查看
+
+
+web页面访问  http://192.168.1.26:50070
+
+
+
+启动yarn
+
+
+web端访问
+
+
+
+
+hbase安装
+下载地址 wget https://mirrors.tuna.tsinghua.edu.cn/apache/hbase/2.0.6/hbase-2.0.6-bin.tar.gz
+
+解压	tar zxvf hbase-2.0.6-bin.tar.gz
+
+添加环境变量
+export HBASE_HOME=/usr/local/hbase
+export PATH=$PATH:$HBASE_HOME/bin
+
+修改配置文件 hbase-site.xml 
+<configuration>
+  <property>
+      <name>hbase.tmp.dir</name>
+      <value>/usr/local/hbase/data</value>
+    </property>
+    <property>
+      <name>hbase.rootdir</name>
+      <value>hdfs://hadoop-master:9000/hbase</value>
+    </property>
+    <property>
+      <name>hbase.cluster.distributed</name>
+      <value>true</value>
+    </property>
+    <property>
+      <name>hbase.zookeeper.quorum</name>
+      <value>hadoop-master,hadoop-node1,hadoop-node2</value>  #主机名
+    </property>
+    <property>
+      <name>hbase.zookeeper.property.clientPort</name>
+      <value>2181</value>
+    </property>
+    <property>
+      <name>hbase.zookeeper.property.dataDir</name>
+      <value>/usr/local/zookeeper/data</value>
+      <description>property from zoo.cfg,the directory where the snapshot is stored</description>
+    </property>
+
+
+文件传送到node节点
+scp -r /usr/local/hbase/  hadoop-node1:/usr/local/
+
+查看状态  master输入 jps，HMaster和HRegionServer 这两个进程
+
+
+
+查看hbase web
